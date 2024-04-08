@@ -32,6 +32,7 @@ import com.facebook.react.bridge.ReactNoCrashSoftException;
 import com.facebook.react.bridge.ReactSoftExceptionLogger;
 import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.common.annotations.VisibleForTesting;
+import com.facebook.react.internal.featureflags.ReactNativeFeatureFlags;
 import com.facebook.react.modules.i18nmanager.I18nUtil;
 import com.facebook.react.touch.OnInterceptTouchEventListener;
 import com.facebook.react.touch.ReactHitSlopView;
@@ -283,13 +284,13 @@ public class ReactViewGroup extends ViewGroup
   }
 
   @Override
-  public boolean dispatchGenericPointerEvent(MotionEvent ev) {
-    // We do not dispatch the pointer event if its children are not supposed to receive it
+  public boolean dispatchGenericMotionEvent(MotionEvent ev) {
+    // We do not dispatch the motion event if its children are not supposed to receive it
     if (!PointerEvents.canChildrenBeTouchTarget(mPointerEvents)) {
       return false;
     }
 
-    return super.dispatchGenericPointerEvent(ev);
+    return super.dispatchGenericMotionEvent(ev);
   }
 
   /**
@@ -418,10 +419,10 @@ public class ReactViewGroup extends ViewGroup
     if (!intersects && child.getParent() != null && !isAnimating) {
       // We can try saving on invalidate call here as the view that we remove is out of visible area
       // therefore invalidation is not necessary.
-      super.removeViewsInLayout(idx - clippedSoFar, 1);
+      removeViewsInLayout(idx - clippedSoFar, 1);
       needUpdateClippingRecursive = true;
     } else if (intersects && child.getParent() == null) {
-      super.addViewInLayout(child, idx - clippedSoFar, sDefaultLayoutParam, true);
+      addViewInLayout(child, idx - clippedSoFar, sDefaultLayoutParam, true);
       invalidate();
       needUpdateClippingRecursive = true;
     } else if (intersects) {
@@ -496,50 +497,90 @@ public class ReactViewGroup extends ViewGroup
     if (getId() == NO_ID) {
       return false;
     }
-    return ViewUtil.getUIManagerType(getId()) == UIManagerType.FABRIC;
+    if (ViewUtil.getUIManagerType(getId()) != UIManagerType.FABRIC) {
+      return false;
+    }
+
+    return !ReactNativeFeatureFlags.enableCustomDrawOrderFabric();
+  }
+
+  private void handleAddView(View view) {
+    UiThreadUtil.assertOnUiThread();
+
+    if (!customDrawOrderDisabled()) {
+      getDrawingOrderHelper().handleAddView(view);
+      setChildrenDrawingOrderEnabled(getDrawingOrderHelper().shouldEnableCustomDrawingOrder());
+    } else {
+      setChildrenDrawingOrderEnabled(false);
+    }
+  }
+
+  private void handleRemoveView(View view) {
+    UiThreadUtil.assertOnUiThread();
+
+    if (!customDrawOrderDisabled()) {
+      if (indexOfChild(view) == -1) {
+        return;
+      }
+      getDrawingOrderHelper().handleRemoveView(view);
+      setChildrenDrawingOrderEnabled(getDrawingOrderHelper().shouldEnableCustomDrawingOrder());
+    } else {
+      setChildrenDrawingOrderEnabled(false);
+    }
+  }
+
+  private void handleRemoveViews(int start, int count) {
+    int endIndex = start + count;
+    for (int index = start; index < endIndex; index++) {
+      if (index < getChildCount()) {
+        handleRemoveView(getChildAt(index));
+      }
+    }
   }
 
   @Override
   public void addView(View child, int index, ViewGroup.LayoutParams params) {
     // This will get called for every overload of addView so there is not need to override every
     // method.
-
-    if (!customDrawOrderDisabled()) {
-      getDrawingOrderHelper().handleAddView(child);
-      setChildrenDrawingOrderEnabled(getDrawingOrderHelper().shouldEnableCustomDrawingOrder());
-    } else {
-      setChildrenDrawingOrderEnabled(false);
-    }
-
+    handleAddView(child);
     super.addView(child, index, params);
   }
 
   @Override
+  protected boolean addViewInLayout(
+      View child, int index, LayoutParams params, boolean preventRequestLayout) {
+    handleAddView(child);
+    return super.addViewInLayout(child, index, params, preventRequestLayout);
+  }
+
+  @Override
   public void removeView(View view) {
-    UiThreadUtil.assertOnUiThread();
-
-    if (!customDrawOrderDisabled()) {
-      getDrawingOrderHelper().handleRemoveView(view);
-      setChildrenDrawingOrderEnabled(getDrawingOrderHelper().shouldEnableCustomDrawingOrder());
-    } else {
-      setChildrenDrawingOrderEnabled(false);
-    }
-
+    handleRemoveView(view);
     super.removeView(view);
   }
 
   @Override
   public void removeViewAt(int index) {
-    UiThreadUtil.assertOnUiThread();
-
-    if (!customDrawOrderDisabled()) {
-      getDrawingOrderHelper().handleRemoveView(getChildAt(index));
-      setChildrenDrawingOrderEnabled(getDrawingOrderHelper().shouldEnableCustomDrawingOrder());
-    } else {
-      setChildrenDrawingOrderEnabled(false);
-    }
-
+    handleRemoveView(getChildAt(index));
     super.removeViewAt(index);
+  }
+
+  @Override
+  public void removeViewInLayout(View view) {
+    handleRemoveView(view);
+    super.removeViewInLayout(view);
+  }
+
+  @Override
+  public void removeViewsInLayout(int start, int count) {
+    handleRemoveViews(start, count);
+    super.removeViewsInLayout(start, count);
+  }
+
+  @Override
+  public void removeViews(int start, int count) {
+    handleRemoveViews(start, count);
+    super.removeViews(start, count);
   }
 
   @Override
@@ -599,8 +640,11 @@ public class ReactViewGroup extends ViewGroup
     return mAllChildrenCount;
   }
 
-  /*package*/ View getChildAtWithSubviewClippingEnabled(int index) {
-    return Assertions.assertNotNull(mAllChildren)[index];
+  /*package*/ @Nullable
+  View getChildAtWithSubviewClippingEnabled(int index) {
+    return index >= 0 && index < mAllChildrenCount
+        ? Assertions.assertNotNull(mAllChildren)[index]
+        : null;
   }
 
   /*package*/ void addViewWithSubviewClippingEnabled(View child, int index) {
@@ -633,8 +677,8 @@ public class ReactViewGroup extends ViewGroup
                 ReactSoftExceptionLogger.logSoftException(
                     TAG,
                     new ReactNoCrashSoftException(
-                        "Child view has been added to Parent view in which it is clipped and not visible."
-                            + " This is not legal for this particular child view. Child: ["
+                        "Child view has been added to Parent view in which it is clipped and not"
+                            + " visible. This is not legal for this particular child view. Child: ["
                             + child.getId()
                             + "] "
                             + child.toString()
@@ -648,7 +692,9 @@ public class ReactViewGroup extends ViewGroup
     }
   }
 
-  /*package*/ void removeViewWithSubviewClippingEnabled(View view) {
+  // TODO: make this method package only once we remove Android's mounting layer retry mechanism.
+  @VisibleForTesting
+  public void removeViewWithSubviewClippingEnabled(View view) {
     UiThreadUtil.assertOnUiThread();
 
     Assertions.assertCondition(mRemoveClippedSubviews);
@@ -663,7 +709,7 @@ public class ReactViewGroup extends ViewGroup
           clippedSoFar++;
         }
       }
-      super.removeViewsInLayout(index - clippedSoFar, 1);
+      removeViewsInLayout(index - clippedSoFar, 1);
     }
     removeFromArray(index);
   }
@@ -716,7 +762,6 @@ public class ReactViewGroup extends ViewGroup
     }
   }
 
-  // This method also sets the child's mParent to null
   private void removeFromArray(int index) {
     final View[] children = Assertions.assertNotNull(mAllChildren);
     final int count = mAllChildrenCount;

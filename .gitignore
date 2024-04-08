@@ -42,6 +42,7 @@ project.xcworkspace
 /packages/react-native/ReactAndroid/hermes-engine/.cxx/
 /packages/react-native/template/android/app/build/
 /packages/react-native/template/android/build/
+/packages/react-native-popup-menu-android/android/build/
 
 # Buck
 .buckd
@@ -78,7 +79,6 @@ package-lock.json
 .DS_Store
 
 # Test generated files
-/packages/react-native/ReactAndroid/src/androidTest/assets/AndroidTestBundle.js
 *.js.meta
 
 /coverage
@@ -109,12 +109,14 @@ package-lock.json
 /packages/react-native/template/vendor
 .ruby-version
 /**/.ruby-version
+vendor/
 
 # iOS / CocoaPods
 /packages/react-native/template/ios/build/
 /packages/react-native/template/ios/Pods/
 /packages/react-native/template/ios/Podfile.lock
 /packages/rn-tester/Gemfile.lock
+/packages/**/RCTLegacyInteropComponents.mm
 
 # Ignore RNTester specific Pods, but keep the __offline_mirrors__ here.
 /packages/rn-tester/Pods/*

@@ -9,7 +9,7 @@
 
 #import <React/RCTDefines.h>
 #import <react/renderer/core/ReactPrimitives.h>
-#import <react/runtime/JSEngineInstance.h>
+#import <react/runtime/JSRuntimeFactory.h>
 
 #import "RCTInstance.h"
 
@@ -41,7 +41,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
-typedef std::shared_ptr<facebook::react::JSEngineInstance> (^RCTHostJSEngineProvider)(void);
+typedef std::shared_ptr<facebook::react::JSRuntimeFactory> (^RCTHostJSEngineProvider)(void);
 
 @interface RCTHost : NSObject
 
@@ -51,6 +51,10 @@ typedef std::shared_ptr<facebook::react::JSEngineInstance> (^RCTHostJSEngineProv
                  jsEngineProvider:(RCTHostJSEngineProvider)jsEngineProvider NS_DESIGNATED_INITIALIZER;
 
 @property (nonatomic, weak, nullable) id<RCTHostRuntimeDelegate> runtimeDelegate;
+
+@property (nonatomic, readonly) RCTSurfacePresenter *surfacePresenter;
+
+@property (nonatomic, readonly) RCTModuleRegistry *moduleRegistry;
 
 - (void)start;
 
@@ -64,11 +68,11 @@ typedef std::shared_ptr<facebook::react::JSEngineInstance> (^RCTHostJSEngineProv
 
 - (RCTFabricSurface *)createSurfaceWithModuleName:(NSString *)moduleName initialProperties:(NSDictionary *)properties;
 
-- (RCTSurfacePresenter *)getSurfacePresenter;
+- (RCTSurfacePresenter *)getSurfacePresenter __attribute__((deprecated("Use `surfacePresenter` property instead.")));
 
 // Native module API
 
-- (RCTModuleRegistry *)getModuleRegistry;
+- (RCTModuleRegistry *)getModuleRegistry __attribute__((deprecated("Use `moduleRegistry` property instead.")));
 
 @end
 
